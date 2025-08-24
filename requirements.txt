@@ -1,0 +1,12 @@
+pandas
+numpy
+pyarrow
+polars
+matplotlib
+scikit-learn
+scipy
+requests
+pydantic
+python-dotenv
+ipykernel
+yfinance
