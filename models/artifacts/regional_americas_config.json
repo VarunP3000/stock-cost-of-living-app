@@ -1,0 +1,36 @@
+{
+  "region": "AMERICAS",
+  "geos": [
+    "Argentina",
+    "Brazil",
+    "Canada",
+    "Chile",
+    "Colombia",
+    "Mexico",
+    "Peru",
+    "United States"
+  ],
+  "features": [
+    "americas_reg_fac1",
+    "americas_reg_fac2",
+    "spx_ret_lag1"
+  ],
+  "splits": [
+    "2016-12-01",
+    "2020-12-01"
+  ],
+  "metrics": {
+    "train": {
+      "rmse": 0.06044930725946589,
+      "r2": 0.0016650509384413814
+    },
+    "valid": {
+      "rmse": 0.04804212465389051,
+      "r2": -0.023829363148284433
+    },
+    "test": {
+      "rmse": 0.04219676666429115,
+      "r2": -0.012608487074518893
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "features": [
+    "cpi_fac1",
+    "cpi_fac2",
+    "cpi_fac3",
+    "spx_ret_lag1",
+    "spx_vol_lag3",
+    "spx_ret_mean6"
+  ],
+  "splits": [
+    "2016-12-01",
+    "2020-12-01"
+  ],
+  "model": "GradientBoosting"
+}

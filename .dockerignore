@@ -1,0 +1,27 @@
+# Git
+.git
+.gitignore
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache/
+
+# Virtual envs
+.venv/
+env/
+
+# Large or private data you don't want in the container
+data/raw/
+data/external/
+
+# Notebooks & local junk
+notebooks/
+.DS_Store
+
+# Node stuff if/when you add a frontend
+node_modules/
+dist/
+build/

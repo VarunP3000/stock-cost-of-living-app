@@ -1,0 +1,39 @@
+{
+  "region": "EMEA",
+  "geos": [
+    "France",
+    "Germany",
+    "Italy",
+    "Netherlands",
+    "Norway",
+    "South Africa",
+    "Spain",
+    "Sweden",
+    "Switzerland",
+    "Turkey",
+    "United Kingdom"
+  ],
+  "features": [
+    "emea_reg_fac1",
+    "emea_reg_fac2",
+    "spx_ret_lag1"
+  ],
+  "splits": [
+    "2016-12-01",
+    "2020-12-01"
+  ],
+  "metrics": {
+    "train": {
+      "rmse": 0.06048208101945911,
+      "r2": 0.0005822243133667415
+    },
+    "valid": {
+      "rmse": 0.047984783434627754,
+      "r2": -0.02138681553618249
+    },
+    "test": {
+      "rmse": 0.04220130644158892,
+      "r2": -0.0128263835946405
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "rmse": null,
+  "mae": null,
+  "r2": null,
+  "samples": 0,
+  "horizon": "1m",
+  "trained_on": null,
+  "created_at": "2025-08-29T00:36:45Z",
+  "notes": "placeholder metrics; replace after backtest",
+  "model": "ridge_spx_americas"
+}

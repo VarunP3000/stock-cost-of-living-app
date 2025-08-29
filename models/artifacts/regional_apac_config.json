@@ -1,0 +1,42 @@
+{
+  "region": "APAC",
+  "geos": [
+    "Australia",
+    "China",
+    "Hong Kong",
+    "India",
+    "Indonesia",
+    "Japan",
+    "Malaysia",
+    "New Zealand",
+    "Philippines",
+    "Singapore",
+    "South Korea",
+    "Taiwan",
+    "Thailand",
+    "Vietnam"
+  ],
+  "features": [
+    "apac_reg_fac1",
+    "apac_reg_fac2",
+    "spx_ret_lag1"
+  ],
+  "splits": [
+    "2016-12-01",
+    "2020-12-01"
+  ],
+  "metrics": {
+    "train": {
+      "rmse": 0.06044713231915338,
+      "r2": 0.0017368889780476904
+    },
+    "valid": {
+      "rmse": 0.04794392398849037,
+      "r2": -0.019648117204695614
+    },
+    "test": {
+      "rmse": 0.04257084262073945,
+      "r2": -0.030641693093005573
+    }
+  }
+}
