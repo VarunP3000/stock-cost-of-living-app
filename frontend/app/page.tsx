@@ -1,6 +1,7 @@
 // frontend/app/page.tsx
 import Link from "next/link";
 import { api } from "@/lib/api";
+import MetricsPanel from "./components/MetricsPanel";
 
 export default async function HomePage() {
   // Server-side check for live coverage
@@ -37,24 +38,10 @@ export default async function HomePage() {
             Live data coverage: <strong>{countriesCount}</strong> countries
           </p>
         </div>
+
+        {/* 🔥 Replace static KPI grid with live MetricsPanel */}
         <div style={styles.heroCard}>
-          <div style={styles.kpiGrid}>
-            <div style={styles.kpi}>
-              <div style={styles.kpiLabel}>Latest Forecast (Ensemble)</div>
-              <div style={styles.kpiValue}>—</div>
-              <div style={styles.kpiHint}>Connect to /forecast/ensemble</div>
-            </div>
-            <div style={styles.kpi}>
-              <div style={styles.kpiLabel}>3y CPI↔SPX Corr (US)</div>
-              <div style={styles.kpiValue}>—</div>
-              <div style={styles.kpiHint}>Connect to /correlations</div>
-            </div>
-            <div style={styles.kpi}>
-              <div style={styles.kpiLabel}>Quantile Band (p10–p90)</div>
-              <div style={styles.kpiValue}>—</div>
-              <div style={styles.kpiHint}>Connect to /forecast/quantiles</div>
-            </div>
-          </div>
+          <MetricsPanel />
         </div>
       </section>
 
@@ -153,20 +140,22 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #333",
     borderRadius: 14,
     padding: 16,
-    background: "#111", // dark card background
+    background: "#111",
+    overflow: "hidden",        // <- add this
   },
-  kpiGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 },
-  kpi: { border: "1px dashed #444", borderRadius: 12, padding: 12, background: "#000" },
-  kpiLabel: { fontSize: 12, opacity: 0.7, color: "#ccc" },
-  kpiValue: { fontSize: 22, fontWeight: 700, marginTop: 4, color: "white" },
-  kpiHint: { fontSize: 12, opacity: 0.6, marginTop: 2, color: "#aaa" },
   features: { marginTop: 10 },
   h2: { fontSize: 22, margin: "4px 0 12px", fontWeight: 700, color: "white" },
   cardGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 },
   card: { border: "1px solid #333", borderRadius: 14, padding: 16, background: "#111" },
   cardTitle: { fontSize: 16, margin: "0 0 8px", fontWeight: 700, color: "white" },
   cardBody: { fontSize: 14, margin: 0, color: "#ccc" },
-  cardLink: { display: "inline-block", marginTop: 10, fontWeight: 600, textDecoration: "none", color: "#0af" },
+  cardLink: {
+    display: "inline-block",
+    marginTop: 10,
+    fontWeight: 600,
+    textDecoration: "none",
+    color: "#0af",
+  },
   api: { marginTop: 36, borderTop: "1px solid #333", paddingTop: 24 },
 };
 

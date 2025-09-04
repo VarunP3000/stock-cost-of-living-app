@@ -35,8 +35,11 @@ export const api = {
     return SeriesSchema.parse(wrapped);
   },
 
-  correlations: (windowMonths: number) =>
-    get(`/correlations?window_months=${windowMonths}`, CorrelationsSchema),
+  correlations: (windowMonths: number, geo?: string) => {
+    const params = new URLSearchParams({ window_months: String(windowMonths) });
+    if (geo) params.set("geo", geo);
+    return get(`/correlations?${params.toString()}`, CorrelationsSchema);
+  },
 
   // Forecast endpoints
   forecastModel: (model: "ridge" | "elasticnet" | "gb" | "quantiles" | "directional") =>
@@ -58,6 +61,24 @@ export const api = {
     get(`/forecast/regional?region=${region}`, ForecastSchema),
 
   artifacts: () => get("/artifacts", ArtifactsSchema),
+};
+
+// ----------------- Metrics helpers -----------------
+
+export function formatNumber(n: number | undefined, opts: Intl.NumberFormatOptions = {}) {
+  if (typeof n !== "number" || Number.isNaN(n)) return "—";
+  return new Intl.NumberFormat(undefined, opts).format(n);
+}
+
+export function formatPct(p: number | undefined, digits = 2) {
+  if (typeof p !== "number" || Number.isNaN(p)) return "—";
+  return `${(p * 100).toFixed(digits)}%`;
+}
+
+export const metricsApi = {
+  ensemble: (weights?: Record<string, number>) => api.forecastEnsemble(weights),
+  correlationUS36m: () => api.correlations(36, "United States"),
+  quantiles: () => api.forecastModel("quantiles"),
 };
 
 export type {
