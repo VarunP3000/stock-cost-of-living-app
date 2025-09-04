@@ -1,8 +1,9 @@
+// frontend/app/forecast/weights/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Line } from "react-chartjs-2";
 import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -16,148 +17,170 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler);
 
-// ---- Types matching backend realtime endpoints ----
-type RealtimeModels = { models: string[]; artifact_dir: string };
-type PastPanelReq = { start?: string | null; end?: string | null; weights?: Record<string, number> | null };
-type PastPanelResp = {
-  points: { asof: string; ensemble: number | null; actual: number | null; model_std: number | null }[];
-  metrics: { rmse: number | null; mae: number | null; mape: number | null; hit_rate: number | null };
-  model_weights: Record<string, number>;
-  model_list: string[];
-  model_panel: ({ asof: string } & Record<string, number | null>)[];
+type Past = {
+  asof: string;
+  dates: string[];
+  prediction: (number | null)[];
+  actual: (number | null)[];
+  p10: (number | null)[];
+  p90: (number | null)[];
+  models: string[];
+  weights: number[];
 };
-type FuturePanelReq = { horizon: number; weights?: Record<string, number> | null };
-type FuturePanelResp = {
-  forecast: { asof: string; yhat: number | null; disagreement: number | null }[];
-  confidence_band: { asof: string; yhat_lo: number | null; yhat_hi: number | null }[];
-  model_weights: Record<string, number>;
-  model_list: string[];
+
+type Future = {
+  asof: string;
+  future_dates: string[];
+  future_prediction: (number | null)[];
+  p10: (number | null)[];
+  p90: (number | null)[];
+  models: string[];
+  weights: number[];
 };
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
-export default function CustomWeightsPage() {
-  const [models, setModels] = useState<string[]>([]);
-  const [weights, setWeights] = useState<Record<string, number>>({});
-  const [start, setStart] = useState<string>("");
-  const [end, setEnd] = useState<string>("");
-  const [horizon, setHorizon] = useState<number>(6);
+/** helper: normalize weights to sum to 1 (and clamp negatives) */
+function normalizeWeights(raw: Record<string, number>): Record<string, number> {
+  const clamped: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw)) clamped[k] = Math.max(0, Number(v) || 0);
+  const s = Object.values(clamped).reduce((a, b) => a + b, 0);
+  if (s <= 0) return Object.fromEntries(Object.keys(raw).map((k) => [k, 1 / Math.max(1, Object.keys(raw).length)]));
+  return Object.fromEntries(Object.entries(clamped).map(([k, v]) => [k, v / s]));
+}
 
-  const [past, setPast] = useState<PastPanelResp | null>(null);
-  const [future, setFuture] = useState<FuturePanelResp | null>(null);
-  const [loadingPast, setLoadingPast] = useState(false);
-  const [loadingFuture, setLoadingFuture] = useState(false);
+function toPct(x: number) {
+  return Math.round(x * 100);
+}
+
+export default function CustomWeightsPage() {
+  const [past, setPast] = useState<Past | null>(null);
+  const [future, setFuture] = useState<Future | null>(null);
   const [errPast, setErrPast] = useState<string | null>(null);
   const [errFuture, setErrFuture] = useState<string | null>(null);
 
-  // Fetch available predictor models
+  // controls
+  const [start, setStart] = useState<string>("2015-01-01");
+  const [end, setEnd] = useState<string>("2025-01-01");
+  const [hzn, setHzn] = useState<number>(6);
+  const [weights, setWeights] = useState<Record<string, number>>({}); // fractions (0..1)
+
+  // initialize once (get default models and weights)
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BASE}/realtime/models`);
-        if (!r.ok) throw new Error(`GET /realtime/models -> ${r.status}`);
-        const j: RealtimeModels = await r.json();
-        setModels(j.models);
-        // default equal weights
-        const w: Record<string, number> = {};
-        j.models.forEach((m) => (w[m] = 1 / Math.max(1, j.models.length)));
-        setWeights(w);
+        const r = await fetch(`${API_BASE}/ensemble/past`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ start, end }),
+        });
+        if (!r.ok) throw new Error(`POST /ensemble/past -> ${r.status} ${await r.text()}`);
+        const data: Past = await r.json();
+        setPast(data);
+
+        // seed weights from backend models (equal split)
+        if (data.models?.length) {
+          const equal = Object.fromEntries(data.models.map((m) => [m, 1 / data.models.length]));
+          setWeights(equal);
+        }
       } catch (e: any) {
-        console.error(e);
+        setErrPast(e?.message ?? String(e));
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Normalize weights to sum to 1
-  const normalizedWeights = useMemo(() => {
-    const s = Object.values(weights).reduce((a, b) => a + (isFinite(b) ? b : 0), 0);
-    if (s <= 0) return weights;
-    const out: Record<string, number> = {};
-    for (const k of Object.keys(weights)) out[k] = weights[k] / s;
-    return out;
-  }, [weights]);
+  const hasAny = (arr?: (number | null)[]) =>
+    Array.isArray(arr) && arr.some((v) => v !== null && !Number.isNaN(v as any));
 
-  function setWeight(name: string, val: number) {
-    setWeights((prev) => ({ ...prev, [name]: val }));
-  }
-
-  // Past panel fetch
-  async function runPast() {
+  const updatePast = useCallback(async () => {
     try {
       setErrPast(null);
-      setLoadingPast(true);
-      const body: PastPanelReq = {
-        start: start || undefined,
-        end: end || undefined,
-        weights: normalizedWeights,
-      };
-      const r = await fetch(`${API_BASE}/realtime/past_panel`, {
+      const body: any = { start, end, weights: normalizeWeights(weights) };
+      const r = await fetch(`${API_BASE}/ensemble/past`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(`POST /realtime/past_panel -> ${r.status} ${text}`);
-      }
-      setPast(await r.json());
+      if (!r.ok) throw new Error(`POST /ensemble/past -> ${r.status} ${await r.text()}`);
+      const data: Past = await r.json();
+      setPast(data);
     } catch (e: any) {
       setErrPast(e?.message ?? String(e));
       setPast(null);
-    } finally {
-      setLoadingPast(false);
     }
-  }
+  }, [start, end, weights]);
 
-  // Future panel fetch
-  async function runFuture() {
+  const genFuture = useCallback(async () => {
     try {
       setErrFuture(null);
-      setLoadingFuture(true);
-      const body: FuturePanelReq = {
-        horizon,
-        weights: normalizedWeights,
-      };
-      const r = await fetch(`${API_BASE}/realtime/future_panel`, {
+      const r = await fetch(`${API_BASE}/ensemble/future`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ horizon: hzn, weights: normalizeWeights(weights) }),
       });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(`POST /realtime/future_panel -> ${r.status} ${text}`);
-      }
+      if (!r.ok) throw new Error(`POST /ensemble/future -> ${r.status} ${await r.text()}`);
       setFuture(await r.json());
     } catch (e: any) {
       setErrFuture(e?.message ?? String(e));
       setFuture(null);
-    } finally {
-      setLoadingFuture(false);
     }
-  }
+  }, [hzn, weights]);
 
-  // --- History chart (ensemble vs actual + implicit band via model_std as shading) ---
+  // ---------- metrics over the visible window ----------
+  const metrics = useMemo(() => {
+    if (!past) return null;
+    const yhat = past.prediction;
+    const y = past.actual;
+    if (!hasAny(yhat) || !hasAny(y)) return null;
+
+    let n = 0,
+      sq = 0,
+      abs = 0,
+      apeSum = 0,
+      dirHit = 0;
+    let prevY: number | null = null;
+    let prevYhat: number | null = null;
+
+    for (let i = 0; i < yhat.length; i++) {
+      const yh = yhat[i];
+      const ya = y[i];
+      if (yh == null || ya == null || Number.isNaN(yh) || Number.isNaN(ya)) continue;
+      const e = yh - ya;
+      sq += e * e;
+      abs += Math.abs(e);
+      if (Math.abs(ya) > 1e-9) apeSum += Math.abs(e / ya);
+      if (prevY != null && prevYhat != null) {
+        const dAct = ya - prevY;
+        const dPred = yh - prevYhat;
+        if (Math.sign(dAct) === Math.sign(dPred)) dirHit += 1;
+      }
+      prevY = ya;
+      prevYhat = yh;
+      n += 1;
+    }
+    if (n === 0) return null;
+    return {
+      rmse: Math.sqrt(sq / n),
+      mae: abs / n,
+      mape: (apeSum / n) * 100,
+      dirHit: (dirHit / Math.max(1, n - 1)) * 100,
+    };
+  }, [past]);
+
+  // ---------- charts ----------
   const pastChart = useMemo(() => {
     if (!past) return null;
-    const labels = past.points.map((p) => p.asof);
-    const ens = past.points.map((p) => (p.ensemble ?? null));
-    const act = past.points.map((p) => (p.actual ?? null));
-    const std = past.points.map((p) => (p.model_std ?? 0));
-
-    // Confidence-like band from ensemble ± model_std (for visualization)
-    const up = ens.map((y, i) => (y != null && std[i] != null ? (y as number) + (std[i] as number) : null));
-    const dn = ens.map((y, i) => (y != null && std[i] != null ? (y as number) - (std[i] as number) : null));
-
+    const labels = past.dates;
     const datasets: any[] = [
-      { label: "Band Upper", data: up, borderWidth: 0, pointRadius: 0, fill: "-1" as const, backgroundColor: "rgba(100,149,237,0.18)" },
-      { label: "Band Lower", data: dn, borderWidth: 0, pointRadius: 0, fill: false },
-      { label: "Ensemble (past)", data: ens, pointRadius: 0 },
+      { label: "p90", data: past.p90, borderWidth: 0, pointRadius: 0, fill: "-1" as const, backgroundColor: "rgba(100,149,237,0.18)", spanGaps: true },
+      { label: "p10", data: past.p10, borderWidth: 0, pointRadius: 0, fill: false, spanGaps: true },
+      { label: "Ensemble (past)", data: past.prediction, pointRadius: 0, spanGaps: true },
     ];
-    if (act.some((v) => v !== null)) {
-      datasets.push({ label: "Actual", data: act, pointRadius: 0 });
+    if (hasAny(past.actual)) {
+      datasets.push({ label: "Actual", data: past.actual, pointRadius: 0, spanGaps: true });
     }
-
     return {
       data: { labels, datasets },
       options: {
@@ -173,27 +196,20 @@ export default function CustomWeightsPage() {
     };
   }, [past]);
 
-  // --- Future chart (yhat + band) ---
   const futureChart = useMemo(() => {
     if (!future) return null;
-    const labels = future.forecast.map((f) => f.asof);
-    const yhat = future.forecast.map((f) => f.yhat ?? null);
-    const lo = future.confidence_band.map((b) => b.yhat_lo ?? null);
-    const hi = future.confidence_band.map((b) => b.yhat_hi ?? null);
-
     return {
       data: {
-        labels,
+        labels: future.future_dates,
         datasets: [
-          { label: "Band Upper", data: hi, borderWidth: 0, pointRadius: 0, fill: "-1" as const, backgroundColor: "rgba(100,149,237,0.18)" },
-          { label: "Band Lower", data: lo, borderWidth: 0, pointRadius: 0, fill: false },
-          { label: "Future Prediction", data: yhat, spanGaps: true, pointRadius: 2 },
+          { label: "Band Upper", data: future.p90, borderWidth: 0, pointRadius: 0, fill: "-1" as const, backgroundColor: "rgba(100,149,237,0.18)", spanGaps: true },
+          { label: "Band Lower", data: future.p10, borderWidth: 0, pointRadius: 0, fill: false, spanGaps: true },
+          { label: "Future Prediction", data: future.future_prediction, pointRadius: 2, spanGaps: true },
         ],
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        interaction: { mode: "index" as const, intersect: false },
         scales: {
           x: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
           y: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
@@ -203,114 +219,112 @@ export default function CustomWeightsPage() {
     };
   }, [future]);
 
-  // Pretty print metrics
-  const m = past?.metrics;
-  const metricsLine = m
-    ? `RMSE: ${fmt(m.rmse)} · MAE: ${fmt(m.mae)} · MAPE: ${fmtPct(m.mape)} · Dir Hit: ${fmtPct(m.hit_rate)}`
-    : null;
+  // render helpers
+  const modelList = past?.models ?? Object.keys(weights);
+  const norm = normalizeWeights(weights);
 
   return (
     <main style={{ minHeight: "100vh", background: "#0b0b0b", padding: 24 }}>
       <div style={card()}>
-        <div style={{ marginBottom: 12 }}>
+        <div style={{ marginBottom: 12, display: "flex", gap: 8 }}>
           <Link href="/" style={btn()}>← Back</Link>
+          <Link href="/forecast" style={btn()}>Standard forecast page →</Link>
         </div>
 
         <h1 style={h1()}>Forecast — Custom Ensemble Weights</h1>
         <p style={{ margin: "0 0 8px", color: "#333" }}>
-          Past: ensemble vs actual (+ band). Future: forecast (+ band). Adjust model weights and recompute.
+          Past: <strong>ensemble vs actual</strong> (+band). Future: <strong>forecast</strong> (+band).
+          Adjust model weights and recompute.
         </p>
 
-        {/* Weight sliders */}
-        <div style={{ ...ctrlBar(), display: "grid", gap: 8 }}>
-          <div style={{ fontWeight: 700, color: "#111" }}>Weights (sum=1 after normalization):</div>
-          {models.length === 0 ? (
-            <div style={{ color: "#666" }}>No predictor models found.</div>
-          ) : (
-            models.map((name) => (
-              <div key={name} style={{ display: "grid", gridTemplateColumns: "240px 1fr 90px", gap: 10, alignItems: "center" }}>
-                <div style={{ color: "#111", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={weights[name] ?? 0}
-                  onChange={(e) => setWeight(name, parseFloat(e.target.value))}
-                />
-                <div style={{ textAlign: "right", color: "#111" }}>{((normalizedWeights[name] ?? 0) * 100).toFixed(0)}%</div>
-              </div>
-            ))
-          )}
+        {/* weights editor */}
+        <div style={{ ...ctrlBar(), flexWrap: "wrap" }}>
+          <div style={{ fontWeight: 700, color: "#111" }}>Weights:</div>
+          {modelList.map((m) => (
+            <label key={m} style={{ display: "flex", alignItems: "center", gap: 6, color: "#111" }}>
+              <span style={{ minWidth: 120 }}>{m}</span>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step="1"
+                value={Math.round((weights[m] ?? norm[m] ?? 0) * 100)}
+                onChange={(e) =>
+                  setWeights((w) => ({ ...w, [m]: Math.max(0, Math.min(100, Number(e.target.value) || 0)) / 100 }))
+                }
+                style={numInput()}
+              />
+              <span>%</span>
+            </label>
+          ))}
         </div>
 
-        {/* History controls */}
-        <div style={{ ...ctrlBar(), marginTop: 12 }}>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <label style={ctrlLabel()}>
-              Start (YYYY-MM-DD):{" "}
-              <input type="text" placeholder="e.g. 2015-01-01" value={start} onChange={(e) => setStart(e.target.value)} style={input()} />
-            </label>
-            <label style={ctrlLabel()}>
-              End (YYYY-MM-DD):{" "}
-              <input type="text" placeholder="e.g. 2024-12-01" value={end} onChange={(e) => setEnd(e.target.value)} style={input()} />
-            </label>
-            <button onClick={runPast} style={btn()} disabled={loadingPast}>
-              {loadingPast ? "Computing…" : "Update Past + Metrics"}
-            </button>
+        {/* past controls */}
+        <div style={ctrlBar()}>
+          <label style={ctrlLabel()}>
+            Start (YYYY-MM-DD):&nbsp;
+            <input type="text" placeholder="e.g. 2015-01-01" value={start} onChange={(e) => setStart(e.target.value)} style={input()} />
+          </label>
+          <label style={ctrlLabel()}>
+            End (YYYY-MM-DD):&nbsp;
+            <input type="text" placeholder="e.g. 2025-01-01" value={end} onChange={(e) => setEnd(e.target.value)} style={input()} />
+          </label>
+          <button onClick={updatePast} style={btn()}>Update Past + Metrics</button>
+        </div>
+
+        {/* metrics */}
+        {metrics && (
+          <div style={{ margin: "8px 0 0", color: "#333" }}>
+            <strong>RMSE:</strong> {metrics.rmse.toFixed(4)} &nbsp;·&nbsp;
+            <strong>MAE:</strong> {metrics.mae.toFixed(4)} &nbsp;·&nbsp;
+            <strong>MAPE:</strong> {metrics.mape.toFixed(1)}% &nbsp;·&nbsp;
+            <strong>Dir Hit:</strong> {metrics.dirHit.toFixed(1)}%
           </div>
-        </div>
-
-        {/* Past chart */}
-        <h3 style={{ ...h3(), marginTop: 10 }}>Past: Predictions vs Actuals</h3>
-        {errPast ? (
-          <div style={{ color: "crimson", marginTop: 6 }}>Error: {errPast}</div>
-        ) : past ? (
-          <>
-            <div style={{ marginTop: 6, color: "#333" }}>{metricsLine}</div>
-            <div style={chartBox()}>
-              <Line data={pastChart!.data} options={pastChart!.options as any} />
-            </div>
-          </>
-        ) : (
-          <div style={{ color: "#666" }}>Run “Update Past + Metrics” to populate.</div>
         )}
 
-        {/* Future controls */}
-        <div style={{ ...ctrlBar(), marginTop: 16 }}>
+        {/* past chart */}
+        <h3 style={{ ...h3(), marginTop: 10 }}>Past: Predictions vs Actuals</h3>
+        {errPast ? (
+          <div style={{ color: "crimson" }}>Error: {errPast}</div>
+        ) : !past ? (
+          <div>Loading…</div>
+        ) : (
+          <div style={chartBox()}>
+            <Line data={pastChart!.data} options={pastChart!.options as any} />
+          </div>
+        )}
+
+        {/* future controls */}
+        <div style={{ ...ctrlBar(), marginTop: 18 }}>
           <label style={ctrlLabel()}>
-            Future horizon (months):{" "}
-            <select value={horizon} onChange={(e) => setHorizon(parseInt(e.target.value, 10))} style={selectStyle()}>
+            Future horizon (months):&nbsp;
+            <select value={hzn} onChange={(e) => setHzn(parseInt(e.target.value, 10))} style={selectStyle()}>
               {[3, 6, 9, 12, 18, 24].map((h) => <option key={h} value={h}>{h}</option>)}
             </select>
           </label>
-          <button onClick={runFuture} style={{ ...btn(), marginLeft: 12 }} disabled={loadingFuture}>
-            {loadingFuture ? "Computing…" : "Generate Future"}
-          </button>
+          <button onClick={genFuture} style={btn()}>Generate Future</button>
         </div>
 
-        {/* Future chart */}
+        {/* future chart */}
         <h3 style={{ ...h3(), marginTop: 10 }}>Future: Forecast</h3>
         {errFuture ? (
           <div style={{ color: "crimson" }}>Error: {errFuture}</div>
-        ) : future ? (
+        ) : !future ? (
+          <div>Loading…</div>
+        ) : (
           <div style={chartBox()}>
             <Line data={futureChart!.data} options={futureChart!.options as any} />
           </div>
-        ) : (
-          <div style={{ color: "#666" }}>Run “Generate Future” to populate.</div>
         )}
+
+        {/* meta */}
+        <div style={{ marginTop: 12, color: "#333" }}>
+          {past?.asof && <span><strong>Past as of:</strong> {new Date(past.asof).toLocaleString()}</span>}
+          {future?.asof && <span style={{ marginLeft: 12 }}><strong>Future as of:</strong> {new Date(future.asof).toLocaleString()}</span>}
+        </div>
       </div>
     </main>
   );
-}
-
-// ---- helpers ----
-function fmt(x?: number | null) {
-  return x == null || !isFinite(x) ? "—" : Number(x).toFixed(4);
-}
-function fmtPct(x?: number | null) {
-  return x == null || !isFinite(x) ? "—" : (Number(x) * 100).toFixed(1) + "%";
 }
 
 const card = () => ({
@@ -323,10 +337,8 @@ const card = () => ({
   padding: 20,
   boxShadow: "0 8px 24px rgba(0,0,0,0.1)",
 });
-
 const h1 = () => ({ fontSize: 28, margin: "4px 0 8px", fontWeight: 800, color: "#111" });
 const h3 = () => ({ fontSize: 18, margin: "0 0 4px", fontWeight: 800, color: "#111" });
-
 const btn = () => ({
   display: "inline-block",
   padding: "8px 12px",
@@ -338,7 +350,6 @@ const btn = () => ({
   fontWeight: 600,
   cursor: "pointer",
 });
-
 const ctrlBar = () => ({
   display: "flex",
   gap: 12,
@@ -349,9 +360,7 @@ const ctrlBar = () => ({
   background: "#fafafa",
   color: "#111",
 });
-
 const ctrlLabel = () => ({ color: "#111", fontWeight: 600 });
-
 const input = () => ({
   height: 36,
   padding: "6px 10px",
@@ -361,7 +370,16 @@ const input = () => ({
   color: "#111",
   fontSize: 14,
 });
-
+const numInput = () => ({
+  width: 80,
+  height: 36,
+  padding: "6px 10px",
+  borderRadius: 8,
+  border: "1px solid #d0d0d0",
+  backgroundColor: "#fff",
+  color: "#111",
+  fontSize: 14,
+});
 const selectStyle = () => ({
   height: 36,
   padding: "6px 10px",
@@ -371,7 +389,6 @@ const selectStyle = () => ({
   color: "#111",
   fontSize: 14,
 });
-
 const chartBox = () => ({
   height: 420,
   border: "1px solid #e6e6e6",
