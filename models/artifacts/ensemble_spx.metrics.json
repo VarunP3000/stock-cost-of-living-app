@@ -1,0 +1,10 @@
+{
+  "rmse": 0.0139526252925272,
+  "mae": 0.0139526252925272,
+  "r2": NaN,
+  "directional_accuracy": 1.0,
+  "samples": 1,
+  "trained_on": "2025-08-29",
+  "evaluated_to": "2025-08-29",
+  "updated_at": "2025-08-29T21:25:09Z"
+}
