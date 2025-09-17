@@ -5,14 +5,21 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import logging
+import os
 
 app = FastAPI(title="Inflation → SPX API (adaptive)")
 logging.basicConfig(level=logging.INFO)
 
-# CORS for Next.js dev
+# --- CORS ---
+# Allow localhost for dev; allow prod domains via env var ALLOWED_ORIGINS (comma-separated)
+default_allowed = {"http://localhost:3000", "http://127.0.0.1:3000"}
+env_allowed = os.getenv("ALLOWED_ORIGINS", "")
+extra_allowed = {o.strip() for o in env_allowed.split(",") if o.strip()}
+allow_origins = list(default_allowed | extra_allowed)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -20,7 +27,7 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "allowed_origins": allow_origins}
 
 # Import routers individually and track which ones are present
 has_data = has_corr = has_forecast = False
@@ -168,7 +175,6 @@ if not has_data:
             raise HTTPException(400, f"Unsupported kind='{kind}' for CPI panel")
 
         sub = sub.sort_values("month")
-        # only non-null rows for the requested column
         sub = sub.dropna(subset=[col])
         if sub.empty:
             raise HTTPException(404, f"Empty series for geo='{geo}', kind='{kind}'")
@@ -225,13 +231,10 @@ if not has_corr:
 
     app.include_router(corr_fallback)
 
-    # NEW: realtime inference routes
+# NEW: realtime inference routes (if available)
 try:
     from app.routes_realtime import router as realtime_router  # /realtime/*
     app.include_router(realtime_router)
     logging.info("Mounted routes_realtime router")
 except Exception as e:
     logging.info("routes_realtime not mounted: %s", e)
-
-
-# NOTE: Removed stray include_router(...) calls that referenced undefined routers.
