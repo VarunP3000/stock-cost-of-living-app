@@ -13,10 +13,14 @@ import {
   Tooltip,
   Legend,
   Filler,
+  type ChartData,
+  type ChartOptions,
+  type ChartDataset,
 } from "chart.js";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler);
 
+// ---------- Response shapes from your backend ----------
 type Past = {
   asof: string;
   dates: string[];
@@ -41,19 +45,25 @@ type Future = {
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
-/** helper: normalize weights to sum to 1 (and clamp negatives) */
+// ---------- helpers ----------
 function normalizeWeights(raw: Record<string, number>): Record<string, number> {
   const clamped: Record<string, number> = {};
   for (const [k, v] of Object.entries(raw)) clamped[k] = Math.max(0, Number(v) || 0);
   const s = Object.values(clamped).reduce((a, b) => a + b, 0);
-  if (s <= 0) return Object.fromEntries(Object.keys(raw).map((k) => [k, 1 / Math.max(1, Object.keys(raw).length)]));
+  if (s <= 0) {
+    const keys = Object.keys(raw);
+    const eq = 1 / Math.max(1, keys.length);
+    return Object.fromEntries(keys.map((k) => [k, eq]));
+  }
   return Object.fromEntries(Object.entries(clamped).map(([k, v]) => [k, v / s]));
 }
 
-function toPct(x: number) {
-  return Math.round(x * 100);
-}
+const _toPct = (x: number) => Math.round(x * 100); // kept, prefixed to avoid "unused" rule
 
+const hasAny = (arr?: (number | null)[]): arr is number[] =>
+  Array.isArray(arr) && arr.some((v): v is number => typeof v === "number" && !Number.isNaN(v));
+
+// ---------- component ----------
 export default function CustomWeightsPage() {
   const [past, setPast] = useState<Past | null>(null);
   const [future, setFuture] = useState<Future | null>(null);
@@ -66,7 +76,7 @@ export default function CustomWeightsPage() {
   const [hzn, setHzn] = useState<number>(6);
   const [weights, setWeights] = useState<Record<string, number>>({}); // fractions (0..1)
 
-  // initialize once (get default models and weights)
+  // init: fetch default models/weights
   useEffect(() => {
     (async () => {
       try {
@@ -79,25 +89,21 @@ export default function CustomWeightsPage() {
         const data: Past = await r.json();
         setPast(data);
 
-        // seed weights from backend models (equal split)
         if (data.models?.length) {
           const equal = Object.fromEntries(data.models.map((m) => [m, 1 / data.models.length]));
           setWeights(equal);
         }
-      } catch (e: any) {
-        setErrPast(e?.message ?? String(e));
+      } catch (e: unknown) {
+        setErrPast(e instanceof Error ? e.message : String(e));
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const hasAny = (arr?: (number | null)[]) =>
-    Array.isArray(arr) && arr.some((v) => v !== null && !Number.isNaN(v as any));
-
   const updatePast = useCallback(async () => {
     try {
       setErrPast(null);
-      const body: any = { start, end, weights: normalizeWeights(weights) };
+      const body = { start, end, weights: normalizeWeights(weights) };
       const r = await fetch(`${API_BASE}/ensemble/past`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -106,8 +112,8 @@ export default function CustomWeightsPage() {
       if (!r.ok) throw new Error(`POST /ensemble/past -> ${r.status} ${await r.text()}`);
       const data: Past = await r.json();
       setPast(data);
-    } catch (e: any) {
-      setErrPast(e?.message ?? String(e));
+    } catch (e: unknown) {
+      setErrPast(e instanceof Error ? e.message : String(e));
       setPast(null);
     }
   }, [start, end, weights]);
@@ -121,9 +127,10 @@ export default function CustomWeightsPage() {
         body: JSON.stringify({ horizon: hzn, weights: normalizeWeights(weights) }),
       });
       if (!r.ok) throw new Error(`POST /ensemble/future -> ${r.status} ${await r.text()}`);
-      setFuture(await r.json());
-    } catch (e: any) {
-      setErrFuture(e?.message ?? String(e));
+      const data: Future = await r.json();
+      setFuture(data);
+    } catch (e: unknown) {
+      setErrFuture(e instanceof Error ? e.message : String(e));
       setFuture(null);
     }
   }, [hzn, weights]);
@@ -146,7 +153,7 @@ export default function CustomWeightsPage() {
     for (let i = 0; i < yhat.length; i++) {
       const yh = yhat[i];
       const ya = y[i];
-      if (yh == null || ya == null || Number.isNaN(yh) || Number.isNaN(ya)) continue;
+      if (typeof yh !== "number" || typeof ya !== "number" || Number.isNaN(yh) || Number.isNaN(ya)) continue;
       const e = yh - ya;
       sq += e * e;
       abs += Math.abs(e);
@@ -169,57 +176,70 @@ export default function CustomWeightsPage() {
     };
   }, [past]);
 
-  // ---------- charts ----------
-  const pastChart = useMemo(() => {
+  // ---------- charts (typed) ----------
+  type YArray = (number | null)[];
+  type LineDS = ChartDataset<"line", YArray>;
+
+  const pastChart = useMemo<{
+    data: ChartData<"line", YArray, string>;
+    options: ChartOptions<"line">;
+  } | null>(() => {
     if (!past) return null;
+
     const labels = past.dates;
-    const datasets: any[] = [
-      { label: "p90", data: past.p90, borderWidth: 0, pointRadius: 0, fill: "-1" as const, backgroundColor: "rgba(100,149,237,0.18)", spanGaps: true },
+    const datasets: LineDS[] = [
+      // In Chart.js v4, `fill` can be boolean | number | 'start'|'end'|'origin'
+      { label: "p90", data: past.p90, borderWidth: 0, pointRadius: 0, fill: "origin", backgroundColor: "rgba(100,149,237,0.18)", spanGaps: true },
       { label: "p10", data: past.p10, borderWidth: 0, pointRadius: 0, fill: false, spanGaps: true },
       { label: "Ensemble (past)", data: past.prediction, pointRadius: 0, spanGaps: true },
     ];
     if (hasAny(past.actual)) {
       datasets.push({ label: "Actual", data: past.actual, pointRadius: 0, spanGaps: true });
     }
-    return {
-      data: { labels, datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "index" as const, intersect: false },
-        scales: {
-          x: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
-          y: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
-        },
-        plugins: { legend: { labels: { color: "#111" } }, tooltip: { enabled: true } },
+
+    const options: ChartOptions<"line"> = {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
+        y: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
       },
+      plugins: { legend: { labels: { color: "#111" } }, tooltip: { enabled: true } },
     };
+
+    return { data: { labels, datasets }, options };
   }, [past]);
 
-  const futureChart = useMemo(() => {
+  const futureChart = useMemo<{
+    data: ChartData<"line", YArray, string>;
+    options: ChartOptions<"line">;
+  } | null>(() => {
     if (!future) return null;
+
+    const datasets: LineDS[] = [
+      { label: "Band Upper", data: future.p90, borderWidth: 0, pointRadius: 0, fill: "origin", backgroundColor: "rgba(100,149,237,0.18)", spanGaps: true },
+      { label: "Band Lower", data: future.p10, borderWidth: 0, pointRadius: 0, fill: false, spanGaps: true },
+      { label: "Future Prediction", data: future.future_prediction, pointRadius: 2, spanGaps: true },
+    ];
+
+    const options: ChartOptions<"line"> = {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
+        y: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
+      },
+      plugins: { legend: { labels: { color: "#111" } }, tooltip: { enabled: true } },
+    };
+
     return {
-      data: {
-        labels: future.future_dates,
-        datasets: [
-          { label: "Band Upper", data: future.p90, borderWidth: 0, pointRadius: 0, fill: "-1" as const, backgroundColor: "rgba(100,149,237,0.18)", spanGaps: true },
-          { label: "Band Lower", data: future.p10, borderWidth: 0, pointRadius: 0, fill: false, spanGaps: true },
-          { label: "Future Prediction", data: future.future_prediction, pointRadius: 2, spanGaps: true },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
-          y: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
-        },
-        plugins: { legend: { labels: { color: "#111" } }, tooltip: { enabled: true } },
-      },
+      data: { labels: future.future_dates, datasets },
+      options,
     };
   }, [future]);
 
-  // render helpers
+  // ---------- render ----------
   const modelList = past?.models ?? Object.keys(weights);
   const norm = normalizeWeights(weights);
 
@@ -286,11 +306,11 @@ export default function CustomWeightsPage() {
         <h3 style={{ ...h3(), marginTop: 10 }}>Past: Predictions vs Actuals</h3>
         {errPast ? (
           <div style={{ color: "crimson" }}>Error: {errPast}</div>
-        ) : !past ? (
+        ) : !past || !pastChart ? (
           <div>Loading…</div>
         ) : (
           <div style={chartBox()}>
-            <Line data={pastChart!.data} options={pastChart!.options as any} />
+            <Line data={pastChart.data} options={pastChart.options} />
           </div>
         )}
 
@@ -309,11 +329,11 @@ export default function CustomWeightsPage() {
         <h3 style={{ ...h3(), marginTop: 10 }}>Future: Forecast</h3>
         {errFuture ? (
           <div style={{ color: "crimson" }}>Error: {errFuture}</div>
-        ) : !future ? (
+        ) : !future || !futureChart ? (
           <div>Loading…</div>
         ) : (
           <div style={chartBox()}>
-            <Line data={futureChart!.data} options={futureChart!.options as any} />
+            <Line data={futureChart.data} options={futureChart.options} />
           </div>
         )}
 
@@ -327,6 +347,7 @@ export default function CustomWeightsPage() {
   );
 }
 
+// ---------- styles ----------
 const card = () => ({
   maxWidth: 1100,
   margin: "0 auto",

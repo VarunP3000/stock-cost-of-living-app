@@ -8,13 +8,15 @@ import {
 } from "@/types/api";
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
-/** Raw fetch (no validation) */
-async function getRaw(path: string): Promise<any> {
+// ---------- core fetch helpers ----------
+
+/** Raw fetch (typed as unknown; caller validates with zod) */
+async function getRaw(path: string): Promise<unknown> {
   const url = `${API_BASE}${path}`;
   const r = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!r.ok) throw new Error(`GET ${url} -> ${r.status}`);
+  if (!r.ok) throw new Error(`GET ${url} -> ${r.status} ${r.statusText}`);
   return r.json();
 }
 
@@ -23,6 +25,8 @@ async function get<T>(path: string, schema: { parse: (d: unknown) => T }): Promi
   const data = await getRaw(path);
   return schema.parse(data);
 }
+
+// ---------- API ----------
 
 export const api = {
   countries: () => get("/countries", CountriesSchema),
@@ -41,21 +45,31 @@ export const api = {
     return get(`/correlations?${params.toString()}`, CorrelationsSchema);
   },
 
-  // Forecast endpoints
-  forecastModel: (model: "ridge" | "elasticnet" | "gb" | "quantiles" | "directional") =>
-    get(`/forecast/${model}`, ForecastSchema),
-
-  forecastEnsemble: (weights?: Record<string, number>) => {
-    const qs =
-      weights && Object.keys(weights).length
-        ? `?${new URLSearchParams({
-            weights: Object.entries(weights)
-              .map(([k, v]) => `${k}:${v}`)
-              .join(","),
-          }).toString()}`
-        : "";
-    return get(`/forecast/ensemble${qs}`, ForecastSchema);
+  forecastModel: (model: "ridge" | "elasticnet" | "gb" | "quantiles" | "directional") => {
+    if (model === "quantiles") return getRaw(`/forecast/quantiles`); // custom shape
+    return get(`/forecast/${model}`, ForecastSchema);
   },
+
+  forecastEnsemble: (
+    weights?: Record<string, number>,
+    opts?: { scenario?: "baseline" | "optimistic" | "pessimistic"; horizon?: number }
+  ) => {
+    const params = new URLSearchParams();
+    if (weights && Object.keys(weights).length) {
+      const w = Object.entries(weights)
+        .filter(([, v]) => typeof v === "number" && v > 0)
+        .map(([k, v]) => `${k}:${v}`)
+        .join(",");
+      if (w) params.set("weights", w);
+    }
+    if (opts?.scenario) params.set("scenario", opts.scenario);
+    if (opts?.horizon) params.set("horizon", String(opts.horizon));
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return getRaw(`/forecast/ensemble${qs}`);
+  },
+
+  quantilesPoint: (horizon = 1, scenario: "baseline" | "optimistic" | "pessimistic" = "baseline") =>
+    getRaw(`/forecast/quantiles?horizon=${horizon}&scenario=${scenario}`),
 
   forecastRegional: (region: "americas" | "emea" | "apac") =>
     get(`/forecast/regional?region=${region}`, ForecastSchema),
@@ -75,10 +89,13 @@ export function formatPct(p: number | undefined, digits = 2) {
   return `${(p * 100).toFixed(digits)}%`;
 }
 
+/** Thin facade tailored for the homepage MetricsPanel */
 export const metricsApi = {
-  ensemble: (weights?: Record<string, number>) => api.forecastEnsemble(weights),
+  ensemble: (weights?: Record<string, number>) =>
+    api.forecastEnsemble(weights, { scenario: "baseline", horizon: 1 }),
   correlationUS36m: () => api.correlations(36, "United States"),
-  quantiles: () => api.forecastModel("quantiles"),
+  quantilesPoint: () => api.quantilesPoint(1, "baseline") as Promise<unknown>,
+  quantiles: () => api.quantilesPoint(1, "baseline") as Promise<unknown>,
 };
 
 export type {
