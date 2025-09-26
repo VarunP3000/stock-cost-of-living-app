@@ -40,7 +40,9 @@ function pearson(xs: number[], ys: number[]): number | null {
   if (!n) return null;
   const mx = xs.reduce((a, b) => a + b, 0) / n;
   const my = ys.reduce((a, b) => a + b, 0) / n;
-  let num = 0, denx = 0, deny = 0;
+  let num = 0,
+    denx = 0,
+    deny = 0;
   for (let i = 0; i < n; i++) {
     const dx = xs[i] - mx;
     const dy = ys[i] - my;
@@ -57,7 +59,8 @@ function linreg(xs: number[], ys: number[]) {
   if (!n) return { a: 0, b: 0 }; // y = a + b x
   const mx = xs.reduce((a, b) => a + b, 0) / n;
   const my = ys.reduce((a, b) => a + b, 0) / n;
-  let sxx = 0, sxy = 0;
+  let sxx = 0,
+    sxy = 0;
   for (let i = 0; i < n; i++) {
     const dx = xs[i] - mx;
     sxx += dx * dx;
@@ -88,8 +91,9 @@ export default function DashboardClient({ initialCountry, countries }: Props) {
       ]);
       setCpi(cpiRes.series);
       setSpx(spxRes.series);
-    } catch (e: any) {
-      setErr(String(e?.message ?? e));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setErr(msg);
     } finally {
       setLoading(false);
     }
@@ -100,14 +104,20 @@ export default function DashboardClient({ initialCountry, countries }: Props) {
     try {
       const res = await api.correlations(window);
       setCorr(res);
-    } catch (e: any) {
-      setCorrErr(String(e?.message ?? e));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setCorrErr(msg);
       setCorr(null);
     }
   }
 
-  useEffect(() => { loadSeries(geo); }, [geo]);
-  useEffect(() => { loadCorr(windowMonths); }, [windowMonths]);
+  useEffect(() => {
+    void loadSeries(geo);
+  }, [geo]);
+
+  useEffect(() => {
+    void loadCorr(windowMonths);
+  }, [windowMonths]);
 
   // Align dates and slice to window
   const { labels, cpiVals, spxVals } = useMemo(() => {
@@ -125,7 +135,7 @@ export default function DashboardClient({ initialCountry, countries }: Props) {
   }, [cpi, spx, windowMonths]);
 
   // ---------- Main time-series chart ----------
-  const lineData = useMemo(
+  const lineData = useMemo<ChartData<"line", (number | null)[], string>>(
     () => ({
       labels,
       datasets: [
@@ -136,16 +146,16 @@ export default function DashboardClient({ initialCountry, countries }: Props) {
     [labels, cpiVals, spxVals, geo]
   );
 
-  const lineOptions = useMemo(
+  const lineOptions = useMemo<ChartOptions<"line">>(
     () => ({
       responsive: true,
-      maintainAspectRatio: false as const,
-      interaction: { mode: "index" as const, intersect: false },
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
       scales: {
         x: { ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 12, color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
         y: { beginAtZero: false, ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
       },
-      plugins: { legend: { position: "top" as const, labels: { color: "#111" } }, tooltip: { enabled: true } },
+      plugins: { legend: { position: "top", labels: { color: "#111" } }, tooltip: { enabled: true } },
     }),
     []
   );
@@ -186,7 +196,7 @@ export default function DashboardClient({ initialCountry, countries }: Props) {
           label: "OLS Fit",
           data: regLine,
           pointRadius: 0,
-          showLine: true, // ← key change: keep dataset type "scatter" but draw a line
+          showLine: true,
         },
       ],
     };
@@ -260,13 +270,24 @@ export default function DashboardClient({ initialCountry, countries }: Props) {
           {/* Country labels */}
           <div style={{ display: "grid", gap: 4 }}>
             {corr.countries.map((country) => (
-              <div key={country} style={{ color: "#111", fontSize: 12, lineHeight: "22px", height: 22, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div
+                key={country}
+                style={{
+                  color: "#111",
+                  fontSize: 12,
+                  lineHeight: "22px",
+                  height: 22,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {country}
               </div>
             ))}
           </div>
 
-        {/* Heat grid */}
+          {/* Heat grid */}
           <div style={{ display: "grid", gap: 4 }}>
             {corr.countries.map((country, rIdx) => (
               <div key={country} style={{ display: "flex" }}>
@@ -276,7 +297,9 @@ export default function DashboardClient({ initialCountry, countries }: Props) {
                   return (
                     <div
                       key={`${rIdx}-${cIdx}`}
-                      title={`${country} @ ${corr.dates[cIdx]} → ${v === null || Number.isNaN(v) ? "NA" : v.toFixed(2)}`}
+                      title={`${country} @ ${corr.dates[cIdx]} → ${
+                        v === null || Number.isNaN(v) ? "NA" : v.toFixed(2)
+                      }`}
                       style={{
                         width: 22,
                         height: 22,
@@ -418,3 +441,4 @@ export default function DashboardClient({ initialCountry, countries }: Props) {
     </section>
   );
 }
+

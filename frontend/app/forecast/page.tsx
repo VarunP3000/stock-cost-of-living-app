@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -13,6 +13,9 @@ import {
   Tooltip,
   Legend,
   Filler,
+  type ChartData,
+  type ChartOptions,
+  type ChartDataset,
 } from "chart.js";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler);
@@ -52,10 +55,10 @@ export default function ForecastPage() {
   const [end, setEnd] = useState<string>("");
   const [hzn, setHzn] = useState<number>(6);
 
-  async function loadPast() {
+  const loadPast = useCallback(async () => {
     try {
       setErrPast(null);
-      const body: any = {};
+      const body: Record<string, string> = {};
       if (start) body.start = start;
       if (end) body.end = end;
       const r = await fetch(`${API_BASE}/ensemble/past`, {
@@ -64,14 +67,15 @@ export default function ForecastPage() {
         body: JSON.stringify(body),
       });
       if (!r.ok) throw new Error(`POST /ensemble/past -> ${r.status} ${await r.text()}`);
-      setPast(await r.json());
-    } catch (e: any) {
-      setErrPast(e?.message ?? String(e));
+      const data: Past = await r.json();
+      setPast(data);
+    } catch (e: unknown) {
+      setErrPast(e instanceof Error ? e.message : String(e));
       setPast(null);
     }
-  }
+  }, [start, end]);
 
-  async function loadFuture() {
+  const loadFuture = useCallback(async () => {
     try {
       setErrFuture(null);
       const r = await fetch(`${API_BASE}/ensemble/future`, {
@@ -80,77 +84,82 @@ export default function ForecastPage() {
         body: JSON.stringify({ horizon: hzn }),
       });
       if (!r.ok) throw new Error(`POST /ensemble/future -> ${r.status} ${await r.text()}`);
-      setFuture(await r.json());
-    } catch (e: any) {
-      setErrFuture(e?.message ?? String(e));
+      const data: Future = await r.json();
+      setFuture(data);
+    } catch (e: unknown) {
+      setErrFuture(e instanceof Error ? e.message : String(e));
       setFuture(null);
     }
-  }
-
-  useEffect(() => {
-    loadPast();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // initial load
-
-  useEffect(() => {
-    loadFuture();
   }, [hzn]);
 
-  const hasAny = (arr?: (number | null)[]) =>
-    Array.isArray(arr) && arr.some((v) => v !== null && !Number.isNaN(v as any));
+  useEffect(() => {
+    void loadPast();
+  }, [loadPast]);
+
+  useEffect(() => {
+    void loadFuture();
+  }, [loadFuture]);
+
+  const hasAny = (arr?: (number | null)[]): arr is number[] =>
+    Array.isArray(arr) && arr.some((v): v is number => typeof v === "number" && !Number.isNaN(v));
 
   // --- PAST chart (prediction vs actual + band) ---
-  const pastChart = useMemo(() => {
+  type YArray = (number | null)[];
+  type LineDS = ChartDataset<"line", YArray>;
+
+  const pastChart = useMemo<{
+    data: ChartData<"line", YArray, string>;
+    options: ChartOptions<"line">;
+  } | null>(() => {
     if (!past) return null;
 
     const labels = past.dates;
-    const datasets: any[] = [
-      // band (p90 filled down to p10)
-      { label: "p90", data: past.p90, borderWidth: 0, pointRadius: 0, fill: "-1" as const, backgroundColor: "rgba(100,149,237,0.18)" },
-      { label: "p10", data: past.p10, borderWidth: 0, pointRadius: 0, fill: false },
+    const datasets: LineDS[] = [
+      { label: "p90", data: past.p90, borderWidth: 0, pointRadius: 0, fill: "origin", backgroundColor: "rgba(100,149,237,0.18)", spanGaps: true },
+      { label: "p10", data: past.p10, borderWidth: 0, pointRadius: 0, fill: false, spanGaps: true },
       { label: "Prediction", data: past.prediction, spanGaps: true, pointRadius: 0 },
     ];
     if (hasAny(past.actual)) {
       datasets.push({ label: "Actual", data: past.actual, spanGaps: true, pointRadius: 0 });
     }
 
-    return {
-      data: { labels, datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "index" as const, intersect: false },
-        scales: {
-          x: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
-          y: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
-        },
-        plugins: { legend: { labels: { color: "#111" } }, tooltip: { enabled: true } },
+    const options: ChartOptions<"line"> = {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
+        y: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
       },
+      plugins: { legend: { labels: { color: "#111" } }, tooltip: { enabled: true } },
     };
+
+    return { data: { labels, datasets }, options };
   }, [past]);
 
   // --- FUTURE chart (yhat + band) ---
-  const futureChart = useMemo(() => {
+  const futureChart = useMemo<{
+    data: ChartData<"line", YArray, string>;
+    options: ChartOptions<"line">;
+  } | null>(() => {
     if (!future) return null;
-    return {
-      data: {
-        labels: future.future_dates,
-        datasets: [
-          { label: "p90", data: future.p90, borderWidth: 0, pointRadius: 0, fill: "-1" as const, backgroundColor: "rgba(100,149,237,0.18)" },
-          { label: "p10", data: future.p10, borderWidth: 0, pointRadius: 0, fill: false },
-          { label: "Future Prediction", data: future.future_prediction, spanGaps: true, pointRadius: 2 },
-        ],
+    const datasets: LineDS[] = [
+      { label: "p90", data: future.p90, borderWidth: 0, pointRadius: 0, fill: "origin", backgroundColor: "rgba(100,149,237,0.18)", spanGaps: true },
+      { label: "p10", data: future.p10, borderWidth: 0, pointRadius: 0, fill: false, spanGaps: true },
+      { label: "Future Prediction", data: future.future_prediction, spanGaps: true, pointRadius: 2 },
+    ];
+
+    const options: ChartOptions<"line"> = {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
+        y: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
-          y: { ticks: { color: "#111" }, grid: { color: "rgba(0,0,0,0.06)" } },
-        },
-        plugins: { legend: { labels: { color: "#111" } }, tooltip: { enabled: true } },
-      },
+      plugins: { legend: { labels: { color: "#111" } }, tooltip: { enabled: true } },
     };
+
+    return { data: { labels: future.future_dates, datasets }, options };
   }, [future]);
 
   const ensembleLabel = useMemo(() => {
@@ -169,8 +178,12 @@ export default function ForecastPage() {
     <main style={{ minHeight: "100vh", background: "#0b0b0b", padding: 24 }}>
       <div style={card()}>
         <div style={{ marginBottom: 12, display: "flex", gap: 8 }}>
-          <Link href="/" style={btn()}>← Back</Link>
-          <Link href="/forecast/weights" style={btn()}>Try custom weights →</Link>
+          <Link href="/" style={btn()}>
+            ← Back
+          </Link>
+          <Link href="/forecast/weights" style={btn()}>
+            Try custom weights →
+          </Link>
         </div>
 
         <h1 style={h1()}>Forecast</h1>
@@ -179,38 +192,48 @@ export default function ForecastPage() {
         </p>
 
         {ensembleLabel && (
-          <div style={{ margin: "0 0 8px", color: "#555", fontSize: 13 }}>
-            Past Ensemble: {ensembleLabel}
-          </div>
+          <div style={{ margin: "0 0 8px", color: "#555", fontSize: 13 }}>Past Ensemble: {ensembleLabel}</div>
         )}
         {futureLabel && (
-          <div style={{ margin: "0 0 8px", color: "#555", fontSize: 13 }}>
-            Future Ensemble: {futureLabel}
-          </div>
+          <div style={{ margin: "0 0 8px", color: "#555", fontSize: 13 }}>Future Ensemble: {futureLabel}</div>
         )}
 
         {/* PAST controls */}
         <div style={ctrlBar()}>
           <label style={ctrlLabel()}>
             Start (YYYY-MM-DD):&nbsp;
-            <input type="text" placeholder="e.g. 2015-01-01" value={start} onChange={(e) => setStart(e.target.value)} style={input()} />
+            <input
+              type="text"
+              placeholder="e.g. 2015-01-01"
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+              style={input()}
+            />
           </label>
           <label style={ctrlLabel()}>
             End (YYYY-MM-DD):&nbsp;
-            <input type="text" placeholder="e.g. 2024-12-01" value={end} onChange={(e) => setEnd(e.target.value)} style={input()} />
+            <input
+              type="text"
+              placeholder="e.g. 2024-12-01"
+              value={end}
+              onChange={(e) => setEnd(e.target.value)}
+              style={input()}
+            />
           </label>
-          <button onClick={loadPast} style={btn()}>Update Past</button>
+          <button onClick={loadPast} style={btn()}>
+            Update Past
+          </button>
         </div>
 
         {/* PAST chart */}
         <h3 style={{ ...h3(), marginTop: 10 }}>Past: Predictions vs Actuals</h3>
         {errPast ? (
           <div style={{ color: "crimson" }}>Error: {errPast}</div>
-        ) : !past ? (
+        ) : !past || !pastChart ? (
           <div>Loading…</div>
         ) : (
           <div style={chartBox()}>
-            <Line data={pastChart!.data} options={pastChart!.options as any} />
+            <Line data={pastChart.data} options={pastChart.options} />
           </div>
         )}
 
@@ -219,32 +242,54 @@ export default function ForecastPage() {
           <label style={ctrlLabel()}>
             Future horizon (months):&nbsp;
             <select value={hzn} onChange={(e) => setHzn(parseInt(e.target.value, 10))} style={selectStyle()}>
-              {[3, 6, 9, 12, 18, 24].map((h) => <option key={h} value={h}>{h}</option>)}
+              {[3, 6, 9, 12, 18, 24].map((h) => (
+                <option key={h} value={h}>
+                  {h}
+                </option>
+              ))}
             </select>
           </label>
-          <button onClick={loadFuture} style={btn()}>Generate Future</button>
+          <button onClick={loadFuture} style={btn()}>
+            Generate Future
+          </button>
         </div>
 
         {/* FUTURE chart */}
         <h3 style={{ ...h3(), marginTop: 10 }}>Future: Forecast</h3>
         {errFuture ? (
           <div style={{ color: "crimson" }}>Error: {errFuture}</div>
-        ) : !future ? (
+        ) : !future || !futureChart ? (
           <div>Loading…</div>
         ) : futureHasLine ? (
           <div style={chartBox()}>
-            <Line data={futureChart!.data} options={futureChart!.options as any} />
+            <Line data={futureChart.data} options={futureChart.options} />
           </div>
         ) : (
-          <div style={{ ...chartBox(), display: "flex", alignItems: "center", justifyContent: "center", color: "#666" }}>
+          <div
+            style={{
+              ...chartBox(),
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#666",
+            }}
+          >
             No future predictions yet. Try a different horizon.
           </div>
         )}
 
         {/* Meta */}
         <div style={{ marginTop: 12, color: "#333" }}>
-          {past?.asof && <span><strong>Past as of:</strong> {new Date(past.asof).toLocaleString()}</span>}
-          {future?.asof && <span style={{ marginLeft: 12 }}><strong>Future as of:</strong> {new Date(future.asof).toLocaleString()}</span>}
+          {past?.asof && (
+            <span>
+              <strong>Past as of:</strong> {new Date(past.asof).toLocaleString()}
+            </span>
+          )}
+          {future?.asof && (
+            <span style={{ marginLeft: 12 }}>
+              <strong>Future as of:</strong> {new Date(future.asof).toLocaleString()}
+            </span>
+          )}
         </div>
       </div>
     </main>

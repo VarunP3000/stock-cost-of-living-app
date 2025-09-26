@@ -58,8 +58,6 @@ function normalizeWeights(raw: Record<string, number>): Record<string, number> {
   return Object.fromEntries(Object.entries(clamped).map(([k, v]) => [k, v / s]));
 }
 
-const _toPct = (x: number) => Math.round(x * 100); // kept, prefixed to avoid "unused" rule
-
 const hasAny = (arr?: (number | null)[]): arr is number[] =>
   Array.isArray(arr) && arr.some((v): v is number => typeof v === "number" && !Number.isNaN(v));
 
@@ -188,7 +186,6 @@ export default function CustomWeightsPage() {
 
     const labels = past.dates;
     const datasets: LineDS[] = [
-      // In Chart.js v4, `fill` can be boolean | number | 'start'|'end'|'origin'
       { label: "p90", data: past.p90, borderWidth: 0, pointRadius: 0, fill: "origin", backgroundColor: "rgba(100,149,237,0.18)", spanGaps: true },
       { label: "p10", data: past.p10, borderWidth: 0, pointRadius: 0, fill: false, spanGaps: true },
       { label: "Ensemble (past)", data: past.prediction, pointRadius: 0, spanGaps: true },
@@ -247,14 +244,18 @@ export default function CustomWeightsPage() {
     <main style={{ minHeight: "100vh", background: "#0b0b0b", padding: 24 }}>
       <div style={card()}>
         <div style={{ marginBottom: 12, display: "flex", gap: 8 }}>
-          <Link href="/" style={btn()}>← Back</Link>
-          <Link href="/forecast" style={btn()}>Standard forecast page →</Link>
+          <Link href="/" style={btn()}>
+            ← Back
+          </Link>
+          <Link href="/forecast" style={btn()}>
+            Standard forecast page →
+          </Link>
         </div>
 
         <h1 style={h1()}>Forecast — Custom Ensemble Weights</h1>
         <p style={{ margin: "0 0 8px", color: "#333" }}>
-          Past: <strong>ensemble vs actual</strong> (+band). Future: <strong>forecast</strong> (+band).
-          Adjust model weights and recompute.
+          Past: <strong>ensemble vs actual</strong> (+band). Future: <strong>forecast</strong> (+band). Adjust model
+          weights and recompute.
         </p>
 
         {/* weights editor */}
@@ -283,13 +284,27 @@ export default function CustomWeightsPage() {
         <div style={ctrlBar()}>
           <label style={ctrlLabel()}>
             Start (YYYY-MM-DD):&nbsp;
-            <input type="text" placeholder="e.g. 2015-01-01" value={start} onChange={(e) => setStart(e.target.value)} style={input()} />
+            <input
+              type="text"
+              placeholder="e.g. 2015-01-01"
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+              style={input()}
+            />
           </label>
           <label style={ctrlLabel()}>
             End (YYYY-MM-DD):&nbsp;
-            <input type="text" placeholder="e.g. 2025-01-01" value={end} onChange={(e) => setEnd(e.target.value)} style={input()} />
+            <input
+              type="text"
+              placeholder="e.g. 2025-01-01"
+              value={end}
+              onChange={(e) => setEnd(e.target.value)}
+              style={input()}
+            />
           </label>
-          <button onClick={updatePast} style={btn()}>Update Past + Metrics</button>
+          <button onClick={updatePast} style={btn()}>
+            Update Past + Metrics
+          </button>
         </div>
 
         {/* metrics */}
@@ -319,10 +334,16 @@ export default function CustomWeightsPage() {
           <label style={ctrlLabel()}>
             Future horizon (months):&nbsp;
             <select value={hzn} onChange={(e) => setHzn(parseInt(e.target.value, 10))} style={selectStyle()}>
-              {[3, 6, 9, 12, 18, 24].map((h) => <option key={h} value={h}>{h}</option>)}
+              {[3, 6, 9, 12, 18, 24].map((h) => (
+                <option key={h} value={h}>
+                  {h}
+                </option>
+              ))}
             </select>
           </label>
-          <button onClick={genFuture} style={btn()}>Generate Future</button>
+          <button onClick={genFuture} style={btn()}>
+            Generate Future
+          </button>
         </div>
 
         {/* future chart */}
@@ -339,8 +360,16 @@ export default function CustomWeightsPage() {
 
         {/* meta */}
         <div style={{ marginTop: 12, color: "#333" }}>
-          {past?.asof && <span><strong>Past as of:</strong> {new Date(past.asof).toLocaleString()}</span>}
-          {future?.asof && <span style={{ marginLeft: 12 }}><strong>Future as of:</strong> {new Date(future.asof).toLocaleString()}</span>}
+          {past?.asof && (
+            <span>
+              <strong>Past as of:</strong> {new Date(past.asof).toLocaleString()}
+            </span>
+          )}
+          {future?.asof && (
+            <span style={{ marginLeft: 12 }}>
+              <strong>Future as of:</strong> {new Date(future.asof).toLocaleString()}
+            </span>
+          )}
         </div>
       </div>
     </main>
