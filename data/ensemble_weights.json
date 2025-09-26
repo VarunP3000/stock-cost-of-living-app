@@ -1,0 +1,13 @@
+{
+  "weights": {
+    "ridge": 0.9,
+    "elasticnet": 0.0,
+    "gb": 0.10000000000000002
+  },
+  "n_samples": 61,
+  "models": [
+    "ridge",
+    "elasticnet",
+    "gb"
+  ]
+}

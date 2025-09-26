@@ -3,10 +3,34 @@
 
 import { useEffect, useState } from "react";
 import { metricsApi, formatNumber, formatPct } from "@/lib/api";
+import type { CorrelationsResponse } from "@/types/api";
+
+/** Minimal shape we actually display from /forecast/ensemble */
+type EnsemblePoint = {
+  prediction?: number;
+  model?: string;
+  asof?: string;
+  horizon?: number;
+  scenario?: string;
+};
+
+/** Quantile point as normalized by metricsApi.quantilesPoint() */
+type QuantilesPoint = {
+  p10?: number;
+  p50?: number;
+  p90?: number;
+} | null | undefined;
+
+type ReadyState = {
+  status: "ready";
+  ensemble?: EnsemblePoint;
+  corr?: CorrelationsResponse;
+  q?: QuantilesPoint;
+};
 
 type State =
   | { status: "loading" }
-  | { status: "ready"; ensemble?: any; corr?: any; q?: any }
+  | ReadyState
   | { status: "error"; message: string };
 
 export default function MetricsPanel() {
@@ -15,13 +39,14 @@ export default function MetricsPanel() {
   async function load() {
     try {
       const [ensemble, corr, q] = await Promise.all([
-        metricsApi.ensemble().catch(() => undefined),
-        metricsApi.correlationUS36m().catch(() => undefined),
-        metricsApi.quantiles().catch(() => undefined),
+        metricsApi.ensemble().catch(() => undefined) as Promise<EnsemblePoint | undefined>,
+        metricsApi.correlationUS36m().catch(() => undefined) as Promise<CorrelationsResponse | undefined>,
+        metricsApi.quantilesPoint().catch(() => undefined) as Promise<QuantilesPoint>,
       ]);
       setState({ status: "ready", ensemble, corr, q });
-    } catch (err: any) {
-      setState({ status: "error", message: err?.message ?? "Failed to load metrics" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load metrics";
+      setState({ status: "error", message: msg });
     }
   }
 
@@ -41,21 +66,32 @@ export default function MetricsPanel() {
     );
   }
 
+  // Ensemble value
   const ensValue =
     typeof state.ensemble?.prediction === "number"
       ? formatNumber(state.ensemble.prediction, { maximumFractionDigits: 3 })
       : "—";
 
-  const corrValue =
-    typeof state.corr?.corr === "number" ? formatPct(state.corr.corr, 1) : "—";
+  // Latest US correlation from full matrix (36m window)
+  const corrValue = (() => {
+    const c = state.corr;
+    if (!c) return "—";
+    const usIdx = c.countries.findIndex((x) => x === "United States");
+    const lastRow = c.matrix.at(-1);
+    const v = usIdx >= 0 && lastRow ? lastRow[usIdx] : null;
+    return typeof v === "number" && Number.isFinite(v) ? formatPct(v, 1) : "—";
+  })();
 
-  const spread =
-    typeof state.q?.p10 === "number" && typeof state.q?.p90 === "number"
-      ? `${formatNumber(state.q.p10, { maximumFractionDigits: 3 })} to ${formatNumber(
-          state.q.p90,
-          { maximumFractionDigits: 3 }
-        )}`
-      : "—";
+  // Quantile spread (p10–p90)
+  const spread = (() => {
+    const q = state.q || undefined;
+    const p10 = typeof q?.p10 === "number" ? q.p10 : undefined;
+    const p90 = typeof q?.p90 === "number" ? q.p90 : undefined;
+    if (p10 === undefined || p90 === undefined) return "—";
+    return `${formatNumber(p10, { maximumFractionDigits: 3 })} to ${formatNumber(p90, {
+      maximumFractionDigits: 3,
+    })}`;
+  })();
 
   return (
     <div style={styles.grid}>
